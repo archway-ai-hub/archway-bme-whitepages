@@ -1,0 +1,966 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "InsuranceX File Import",
+        "formDescription": "Only CSV File is Allowed.  Depending on the size of the file, the process can take 30-60 minutes. ",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "data",
+              "fieldType": "file",
+              "acceptFileTypes": ".csv",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -2240,
+        -160
+      ],
+      "id": "5a7ec117-2dce-42fe-9263-7d31e8e6b5aa",
+      "name": "On form submission",
+      "webhookId": "043e10db-b6b1-4fa9-8ca4-acbb44449dca"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -2016,
+        -160
+      ],
+      "id": "1bff9cdc-29c1-4be6-a5de-75ee0c389c72",
+      "name": "Extract from File",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code Node: Data Cleanup & Preparation for PipeDrive Import\n\n// Input: CSV data from previous node\nconst csvData = $input.all();\nconst cleanedData = [];\n\n// Process each row from the CSV\nfor (const item of csvData) {\n  const data = item.json;\n\n\n  // Create persons_info object by pairing names with phones\n  const persons_info = {};\n  for (let i = 1; i <= 10; i++) {\n    const nameKey = `name${i}`;\n    const phoneKey = `phone${i}`;\n    const name = data[nameKey] || '';\n    const phone = data[phoneKey] || '';\n    \n    // Only add to persons_info if both name and phone exist\n    if (name && phone) {\n      persons_info[name] = phone;\n    }\n  }\n  \n  // Extract only the columns we care about for PipeDrive\n  // Following the exact specification from the process document\n  const cleanedItem = {\n    // Organization fields\n    fein: data.fein || '',           // FEIN -- organization field\n    name: data.name || '',           // Organization Name - organization field  \n    address: data.address || '',     // Address - organization field\n    city: data.city || '',           // City/Town/Village - organization field\n    state: data.state || '',         // State - organization field\n    zip: data.zip || '',             // Zip Code - organization field\n    website: data.website || '',     // Website - organization field\n    expdate: data.expdate || '',     // WC Renewal - organization field\n    lat: data.lat || '',\n    long: data.long || '',\n    // Person fields\n    phone: data.phone || '',         // Phone - Person field\n    email: data.email1 || '',        // Email - Person field\n    personName: data.county || '' ,   // Person name - Person field (using county as specified)\n\n       // Additional persons information\n    persons_info: persons_info       // Object containing name-phone pairs\n\n  };\n  \n  // Data validation - skip rows with missing critical information\n  // Must have organization name, and personName (county) cannot be blank per requirements\n  if (!cleanedItem.name || !cleanedItem.personName) {\n    console.log(`Skipping row with missing critical data - Name: ${cleanedItem.name}, County: ${cleanedItem.personName}`);\n    continue;\n  }\n  \n  // Clean up phone number format\n  if (cleanedItem.phone) {\n    cleanedItem.phone = cleanedItem.phone.replace(/[^\\d]/g, ''); // Remove non-digits\n    if (cleanedItem.phone.length === 10) {\n      cleanedItem.phone = `(${cleanedItem.phone.slice(0,3)}) ${cleanedItem.phone.slice(3,6)}-${cleanedItem.phone.slice(6)}`;\n    }\n  }\n  \n  // Clean up ZIP code (convert to string and remove ZIP+4 extension)\n  if (cleanedItem.zip) {\n    cleanedItem.zip = String(cleanedItem.zip).split('-')[0];\n  }\n  \n  // Clean up website URL\n  if (cleanedItem.website && !cleanedItem.website.startsWith('http')) {\n    cleanedItem.website = 'https://' + cleanedItem.website;\n  }\n  \n  cleanedData.push(cleanedItem);\n}\n\n// Log summary\nconsole.log(`Processed ${csvData.length} rows, cleaned ${cleanedData.length} valid records`);\n\n// Return cleaned data\nreturn cleanedData.map(item => ({ json: item }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1792,
+        -160
+      ],
+      "id": "9887ce75-9314-481b-a29c-72543b48fc9c",
+      "name": "Data Cleanup & Preparation"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b7bfa559-8206-464c-b22f-3ca8691359af",
+              "leftValue": "={{ $json.lat }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "ad1ba44b-deec-4777-b4bf-a50a19f7bd33",
+              "leftValue": "={{ $json.long }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -912,
+        -160
+      ],
+      "id": "2f94d1c6-ae19-426e-8792-2a20a5eccce6",
+      "name": "Check lat/long"
+    },
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/place/nearbysearch/json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "location",
+              "value": "={{$json.lat}},{{$json.long}}"
+            },
+            {
+              "name": "radius",
+              "value": "50"
+            },
+            {
+              "name": "type",
+              "value": "restaurant"
+            },
+            {
+              "name": "fields",
+              "value": "name,place_id,formatted_address,types,business_status"
+            },
+            {
+              "name": "key",
+              "value": "YOUR_GOOGLE_API_KEY_HERE"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -688,
+        -224
+      ],
+      "id": "3563a9d5-54ac-46a7-8cfc-0bfea056a101",
+      "name": "Find by Latlong"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        384,
+        -160
+      ],
+      "id": "fe94a369-3caa-4f05-b8c5-3f1824790c0a",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "eb5dd22f-4669-46e7-8b09-a7f51b6a5b64",
+              "name": "name",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "ad95376b-c9dd-44a4-8cea-cd6f7def68e9",
+              "name": "original_data",
+              "value": "={{ $('Check lat/long').item.json }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        160,
+        -32
+      ],
+      "id": "85f095e7-3224-45ae-ae12-55ae8b7f3e5f",
+      "name": "Remap Restaurant (Perplexity)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d123286d-8776-47a9-b418-cefd01484566",
+              "name": "name",
+              "value": "={{ $json.results[0].name }}",
+              "type": "string"
+            },
+            {
+              "id": "d00891d2-e4f3-4b86-9985-b92acf893fa7",
+              "name": "original_data",
+              "value": "={{ $('Check lat/long').item.json }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        160,
+        -272
+      ],
+      "id": "0258011b-a1c2-4c26-bcf1-e84a99a05233",
+      "name": "Remap Restaurant (Google Places)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ce7f30fb-9b4d-41ff-96e5-4113a94ce836",
+              "leftValue": "={{ $json.results[0].name }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -464,
+        -224
+      ],
+      "id": "739fb0fd-3a70-49d5-b974-052e03185a5b",
+      "name": "Check latlong result"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9510cdc2-ac04-46eb-a372-f79949b8893f",
+              "name": "Owners",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "5a478555-f085-49fe-840c-cad7573d4318",
+              "name": "original_data",
+              "value": "={{ $('Merge').item.json.original_data.parseJson() }}",
+              "type": "object"
+            },
+            {
+              "id": "cf1b11cc-ea93-467a-8399-c72272a85b4b",
+              "name": "name",
+              "value": "={{ $('Merge').item.json.name }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1008,
+        -32
+      ],
+      "id": "b919e8f7-43e4-49a1-bfb4-39fc9893a67d",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Find the actual restaurant name for this business:  \n\nLLC/Business Name: {{ $('Data Cleanup & Preparation').item.json.name || \"Unknown\"}} \nAddress: {{$('Data Cleanup & Preparation').item.json.address || \"Unknown\"}} \nCity: {{$('Data Cleanup & Preparation').item.json.city || \"Unknown\"}}   \nState: {{$('Data Cleanup & Preparation').item.json.state || \"Unknown\"}} \nZip Code: {{$('Data Cleanup & Preparation').item.json.zip || \"Unknown\"}} \n\nWhat is the actual restaurant name that customers would see on the storefront or menu? Return only the restaurant name.",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a restaurant identification specialist. Your task is to find the actual restaurant name (DBA name) based on the provided LLC/business name and location information. Many restaurants operate under a different name than their legal LLC name.\n\nRules:\n- Return only the actual restaurant name that customers would recognize\n- Convert LLC names to the real restaurant/business name that appears on storefronts\n- If multiple restaurant names are found at the same location, return the primary one\n- If no restaurant name is found, return the original LLC name\n- Do not include explanations, sources, or additional information\n- Return only the restaurant name as a plain string\n- Use proper capitalization as it would appear on signage"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -240,
+        -128
+      ],
+      "id": "905e6735-3497-4c37-8c44-ab07a37699c1",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "perplexity/sonar-pro",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        96
+      ],
+      "id": "3b90af12-44fb-43a1-b0ac-3f45de1cc404",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "lj4MCZ82YlgmQ1xE",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Find the current owners of this restaurant:\n\nRestaurant Name: {{$json.name || \"Unknown\"}}\nBusiness Name/LLC: {{$json.original_data.parseJson().name || \"Unknown\"}}\nAddress: {{$json.original_data.parseJson().address || \"Unknown\"}}\nCity: {{$json.original_data.parseJson().city || \"Unknown\"}}\nState: {{$json.original_data.parseJson().state || \"Unknown\"}}\nWebsite: {{$json.original_data.parseJson().website || \"None\"}}\n\nReturn only a JSON array of owner names: [\"Owner Name 1\", \"Owner Name 2\", ...]",
+        "needsFallback": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a restaurant ownership research assistant. Your task is to find the current owners of restaurants based on provided information. You must return your response as a valid JSON array of strings containing owner names only.\n\nRules:\n- Return only owner names, not managers, employees, or registered agents\n- If multiple owners exist, include all of them in the array\n- If no owners are found, return an empty array []\n- Do not include explanations, sources, or additional information\n- Format: [\"Owner Name 1\", \"Owner Name 2\", ...]\n- Use proper capitalization for names\n- If you're unsure about ownership, don't include the name"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        608,
+        -160
+      ],
+      "id": "f1cdc064-76f7-4352-b955-3cb4cb6c3e79",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "model": "perplexity/sonar-pro",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        704,
+        64
+      ],
+      "id": "c38e7119-47fb-45ea-b824-5e65d6dd89a0",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "lj4MCZ82YlgmQ1xE",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code Node: Find Owner Phone Number from persons_info\nconst inputData = $input.all();\nconst results = [];\n\nfor (const item of inputData) {\n  const data = item.json;\n  const persons_info = data.original_data.persons_info || {};\n  \n  // Parse Owners field - handle malformed JSON\n  let owners = [];\n  try {\n    // Clean up the Owners field before parsing\n    let ownersStr = data.Owners || '[]';\n    // Remove backticks and \"```\" that appear in some entries\n    ownersStr = ownersStr.replace(/```/g, '').replace(/\\n/g, ' ').trim();\n    \n    // If it starts with '[' parse as JSON, otherwise treat as empty\n    if (ownersStr.startsWith('[')) {\n      // Find the closing bracket\n      const closingBracketIndex = ownersStr.indexOf(']');\n      if (closingBracketIndex !== -1) {\n        ownersStr = ownersStr.substring(0, closingBracketIndex + 1);\n      }\n      owners = JSON.parse(ownersStr);\n    }\n  } catch (e) {\n    console.log(`Error parsing owners for ${data.name}:`, e.message);\n    owners = [];\n  }\n  \n  let ownerPhone = '';\n  let ownerName = '';\n  console.log({owners});\n  console.log({persons_info});\n  \n  // Iterate through the owners array and find the first match in persons_info\n  for (const owner of owners) {\n    // Check exact match first\n    if (persons_info[owner]) {\n      ownerPhone = persons_info[owner];\n      ownerName = owner;\n      console.log(`Found owner phone for ${owner}: ${ownerPhone}`);\n      break;\n    }\n    \n    // Check case-insensitive match\n    const lowerOwner = owner.toLowerCase();\n    for (const [personName, phone] of Object.entries(persons_info)) {\n      if (personName.toLowerCase().includes(lowerOwner) || lowerOwner.includes(personName.toLowerCase())) {\n        ownerPhone = phone;\n        ownerName = owner;\n        console.log(`Found owner phone for ${owner} (matched with ${personName}): ${ownerPhone}`);\n        break;\n      }\n    }\n    \n    if (ownerPhone) break;\n  }\n  \n  // Create a copy of original_data without persons_info\n  const { persons_info: removedPersonsInfo, ...cleanOriginalData } = data.original_data;\n  \n  // Structure the data according to your expected format\n  const updatedData = {\n    original_data: cleanOriginalData,\n    found: {\n      owner_phone: ownerPhone,\n      owner_name: ownerName || owners?.[0] || '',\n      restaurant_name: item.json.name,\n    }\n  };\n  \n  results.push(updatedData);\n}\n\nconsole.log(`Processed ${results.length} records for owner phone lookup`);\n// Return updated data\nreturn results.map(item => ({ json: item }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -912,
+        -576
+      ],
+      "id": "25c6126a-2674-4782-ab57-bf9dbd1f5a06",
+      "name": "Contact details fallback"
+    },
+    {
+      "parameters": {
+        "functionCode": "// n8n Code Node: Merge Data Function - Collect and make iterable for next node\n\nconst allData = []\n\nlet counter = 0;\ndo {\n  try {\n    const items = $items(\"Contact details fallback\", 0, counter).map(item => item.json);\n    allData.push.apply(allData, items);\n  } catch (error) {\n    console.log(`Merged ${allData.length} records with owner phone information`);\n    // Return each item separately so the next node can iterate through them\n    return allData.map(item => ({json: item}));\n  }\n\n  counter++;\n} while(true);"
+      },
+      "name": "Merge Data",
+      "type": "n8n-nodes-base.function",
+      "position": [
+        -688,
+        -576
+      ],
+      "typeVersion": 1,
+      "id": "c5dd4103-fe79-476b-bab4-9b943162f3a7"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a717bebd-b45d-45b3-9177-081eef54f14b",
+              "leftValue": "={{  $json.found.owner_name }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -464,
+        -576
+      ],
+      "id": "ebdcf1b5-665d-44e1-8ff9-02a8c68ec464",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "options": {
+          "fileName": "leadgenfile.csv"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1008,
+        -832
+      ],
+      "id": "ed69a6b3-a304-4a34-8613-1e26476415cb",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1136,
+        -160
+      ],
+      "id": "40a05c76-1d10-4bb4-94dd-f6e6e1f99df5",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        272,
+        -576
+      ],
+      "id": "c67d8d43-8e4c-4db8-8a08-c39fad83786a",
+      "name": "Loop Over Items2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const persons = [];\nconst items = $input.all();\n\nfor (const item of items) {\n  const data = item.json;\n  persons.push({\n    name: data.found.owner_name,\n    location: `${data.original_data.city}, ${data.original_data.state}`,\n  });\n}\n\nreturn [\n  {\n    json: {\n      // items,\n      persons,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        -576
+      ],
+      "id": "dbe14ea6-eaa7-4bdb-b8f0-4a5c6e1be616",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// const airtopData = JSON.parse($('Query page').first().json.data.modelResponse);\n\n// const item = $(\"Loop Over Items\").first()\n\n// const data = item.json;\n\n// console.log('LOG:::',item)\n\n// const res = [];\n\n// return [{ json: {\n// FEIN: data.original_data.fein || '',\n// Name: data.found.restaurant_name || '',\n// Address: airtopData.address || '',\n// City: airtopData.city || '',\n// State: airtopData.state || '',\n// Zip: airtopData.zip_code || '',\n// Phone: airtopData.phone_number || '',\n// Email: airtopData.emails || '',\n// County: airtopData.county || '',\n// Expdate: data.original_data.expdate || ''\n// } }]\n\nconsole.log(\"loop over items\", $(\"Loop Over Items2\").all());\n\nconst res = [];\n\n$(\"Loop Over Items2\")\n  .all()\n  .forEach((item, index) => {\n    const data = item.json;\n    const whitePagesData = $input.first().json.data[index];\n\n    res.push({\n      json: {\n        FEIN: data.original_data.fein || \"\",\n        Name: data.found.restaurant_name || \"\",\n        OnwerName: whitePagesData.name || \"\",\n        Address: whitePagesData.address || \"\",\n        City: whitePagesData.city || \"\",\n        State: whitePagesData.state || \"\",\n        Zip: whitePagesData.zip_code || \"\",\n        Phone: whitePagesData.phone_number || \"\",\n        Email: whitePagesData.emails || \"\",\n        County: whitePagesData.county || \"\",\n        Expdate: data.original_data.expdate || \"\"\n      },\n    });\n  });\n\nreturn res;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        -560
+      ],
+      "id": "35a23e4a-68fc-4dd4-96d9-8fc52bc1cb11",
+      "name": "Code2"
+    },
+    {
+      "parameters": {
+        "toRecipients": "kacy@restaurantproins.com",
+        "subject": "File Ready for Pipedrive Import",
+        "bodyContent": "Please see the file attached and upload to Pipedrive",
+        "additionalFields": {
+          "attachments": {
+            "attachments": [
+              {
+                "binaryPropertyName": "data"
+              }
+            ]
+          },
+          "ccRecipients": "patrick@restaurantproins.com"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        -832
+      ],
+      "id": "f6b1e1b7-a2e8-4897-a472-acf358b72ad1",
+      "name": "Send a message",
+      "webhookId": "9c94915a-484b-4509-b724-49fbbb74b69b",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "d1vNjsTa3Nyl9hjz",
+          "name": "Microsoft Outlook account - Test Email"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "errorMessage": "The file format is not correct; the file type must be CSV"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -1792,
+        64
+      ],
+      "id": "a77372f0-6243-4abf-826b-22fe24ba6354",
+      "name": "Stop and Error"
+    },
+    {
+      "parameters": {
+        "maxItems": 10
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        -1584,
+        -160
+      ],
+      "id": "db22bdcf-44e7-4f4c-941f-bc246ef95f83",
+      "name": "Limit",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "model": "perplexity/sonar-pro",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        496,
+        48
+      ],
+      "id": "495e5c18-dd07-436b-8b45-035a23574cf7",
+      "name": "OpenRouter Chat Model2",
+      "credentials": {
+        "openRouterApi": {
+          "id": "lj4MCZ82YlgmQ1xE",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1792,
+        -560
+      ],
+      "id": "db1d5e94-a7d1-4ff0-b836-23b30b7c1c21",
+      "name": "Wait",
+      "webhookId": "5876347b-6551-4bb4-9af5-02c8f6b4755a"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://31.97.13.50:3000/api/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "YOUR_EMAIL_HERE"
+            },
+            {
+              "name": "password",
+              "value": "YOUR_PASSWORD_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.persons }}",
+        "options": {
+          "redirect": {
+            "redirect": {}
+          },
+          "timeout": 18000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1216,
+        -576
+      ],
+      "id": "62c7e3c0-7cba-4b26-8e1a-122db705989c",
+      "name": "Whitepages API",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Data Cleanup & Preparation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop and Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Cleanup & Preparation": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check lat/long": {
+      "main": [
+        [
+          {
+            "node": "Find by Latlong",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find by Latlong": {
+      "main": [
+        [
+          {
+            "node": "Check latlong result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remap Restaurant (Perplexity)": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Remap Restaurant (Google Places)": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check latlong result": {
+      "main": [
+        [
+          {
+            "node": "Remap Restaurant (Google Places)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Remap Restaurant (Perplexity)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact details fallback": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Data": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "Contact details fallback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check lat/long",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items2": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Whitepages API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whitepages API": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "On form submission": [
+      {
+        "data": [
+          {
+            "filename": "Brad-data_export_2025-12-10.csv",
+            "mimetype": "text/csv",
+            "size": 78180
+          }
+        ],
+        "submittedAt": "2025-12-10T06:55:26.166-08:00",
+        "formMode": "production"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fb8905a43f7e3254914db9b4e5e0f9fbf2a90eadd384bd149fc77940be3101cc"
+  }
+}
