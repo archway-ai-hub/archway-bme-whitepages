@@ -11,3 +11,8 @@ redis>=5.0.0
 # Web UI dependencies
 streamlit>=1.29.0
 bcrypt>=4.0.0
+
+# FastAPI REST API dependencies
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
