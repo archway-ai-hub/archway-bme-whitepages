@@ -9,13 +9,16 @@ from typing import Optional
 
 import streamlit as st
 
-from main import process_batch, Config, RestaurantRecord
+from main import process_batch, Config, RestaurantRecord, format_output_row
+from components.job_manager import JobManager
 
 
 def run_processing(
     records: list[RestaurantRecord],
     config: Config,
-    batch_size: int = 10
+    batch_size: int = 10,
+    job_manager: Optional[JobManager] = None,
+    job_id: Optional[str] = None
 ) -> list[RestaurantRecord]:
     """Run batch processing with Streamlit progress tracking.
 
@@ -26,6 +29,8 @@ def run_processing(
         records: List of restaurant records to process.
         config: Configuration object with API keys.
         batch_size: Number of concurrent operations (semaphore limit).
+        job_manager: Optional JobManager for Redis persistence.
+        job_id: Optional job ID for tracking in Redis.
 
     Returns:
         List of enriched RestaurantRecord objects.
@@ -59,6 +64,10 @@ def run_processing(
         # Update status text with friendlier message
         status_text.text(f"Working on record {current} of {total}... {message}")
 
+        # Update job progress in Redis
+        if job_manager and job_id:
+            job_manager.update_progress(job_id, current, total, message)
+
     try:
         # Run async process_batch using asyncio.run()
         # This creates a new event loop for the sync context
@@ -75,9 +84,20 @@ def run_processing(
         progress_bar.progress(1.0)
         status_text.text(f"Done! We've enriched all {total} records.")
 
+        # Save results and mark job as completed in Redis
+        if job_manager and job_id:
+            # Convert RestaurantRecord objects to dicts for storage
+            result_dicts = [format_output_row(r) for r in results]
+            job_manager.save_results(job_id, result_dicts)
+            job_manager.mark_completed(job_id)
+
         return results
 
     except Exception as e:
+        # Mark job as failed in Redis
+        if job_manager and job_id:
+            job_manager.mark_failed(job_id, str(e))
+
         # Display error in Streamlit with friendlier messaging
         st.error(f"Oops, something went wrong: {str(e)}")
 

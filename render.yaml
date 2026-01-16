@@ -17,3 +17,5 @@ services:
         sync: false
       - key: YELP_API_KEY
         sync: false
+      - key: REDIS_URL
+        sync: false

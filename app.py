@@ -17,6 +17,8 @@ from components.auth import check_password, logout_button
 from components.upload import render_upload_section, validate_csv, render_preview
 from components.progress import run_processing
 from components.results import render_results, render_download_button
+from components.job_manager import JobManager
+from components.job_history import render_job_history, render_viewed_job_results
 
 # Import from main.py
 from main import Config, parse_csv_row
@@ -74,6 +76,23 @@ def main_app() -> None:
         )
     with col2:
         logout_button()
+    
+    # Initialize job manager for persistence
+    if "job_manager" not in st.session_state:
+        st.session_state.job_manager = JobManager()
+
+    # Generate session ID for job tracking
+    if "session_id" not in st.session_state:
+        import uuid
+        st.session_state.session_id = str(uuid.uuid4())
+    
+    # Show job history if available
+    if st.session_state.job_manager.is_available():
+        render_job_history(st.session_state.job_manager, st.session_state.session_id)
+
+    # Check if viewing past job results
+    if render_viewed_job_results():
+        return  # Stop here if viewing past results
     
     st.markdown("---")
     
@@ -146,12 +165,26 @@ def main_app() -> None:
         
         st.info(f"Great! We've got {len(records)} records ready to go. Starting enrichment now...")
         
+        # Create job for tracking
+        job_id = None
+        if st.session_state.job_manager.is_available():
+            # Get filename from the file uploader widget
+            uploaded_file = st.session_state.get("csv_uploader")
+            filename = uploaded_file.name if uploaded_file and hasattr(uploaded_file, 'name') else "uploaded_file.csv"
+            job_id = st.session_state.job_manager.create_job(
+                session_id=st.session_state.session_id,
+                filename=filename,
+                total_records=len(records)
+            )
+        
         # Run processing with progress tracking
         try:
             results = run_processing(
                 records=records,
                 config=config,
-                batch_size=batch_size
+                batch_size=batch_size,
+                job_manager=st.session_state.job_manager,
+                job_id=job_id
             )
             
             # Store results in session state
