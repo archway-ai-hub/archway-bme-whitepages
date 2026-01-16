@@ -697,3 +697,105 @@
   color: var(--color-primary);
   animation: bounce 0.5s ease infinite;
 }
+
+/* Password Gate */
+.password-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--color-bg) 0%, #1a1f35 100%);
+  padding: var(--space-lg);
+}
+
+.password-gate-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+  animation: fadeIn 0.3s ease;
+}
+
+.password-gate-icon {
+  font-size: 3rem;
+  margin-bottom: var(--space-md);
+}
+
+.password-gate-card h1 {
+  margin: 0 0 var(--space-sm) 0;
+  font-size: 1.5rem;
+  color: var(--color-text);
+}
+
+.password-gate-card p {
+  margin: 0 0 var(--space-lg) 0;
+  color: var(--color-text-muted);
+}
+
+.password-gate form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.password-input {
+  width: 100%;
+  padding: var(--space-md);
+  font-size: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text);
+  text-align: center;
+  letter-spacing: 0.1em;
+  transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
+  box-sizing: border-box;
+}
+
+.password-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(79, 142, 247, 0.2);
+}
+
+.password-input::placeholder {
+  color: var(--color-text-muted);
+  letter-spacing: normal;
+}
+
+.password-error {
+  color: var(--color-error);
+  font-size: 0.875rem;
+  animation: shake 0.3s ease;
+}
+
+.password-submit {
+  width: 100%;
+  padding: var(--space-md);
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-primary) 0%, #3A7BE0 100%);
+  color: white;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-normal), opacity var(--transition-normal);
+}
+
+.password-submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.password-submit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.password-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

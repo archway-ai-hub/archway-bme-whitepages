@@ -3,9 +3,16 @@ import './App.css';
 import FileUpload from './components/FileUpload';
 import JobStatus from './components/JobStatus';
 import JobHistory from './components/JobHistory';
+import PasswordGate from './components/PasswordGate';
 import { uploadFile, startJob, getJobStatus, getJobResults, getJobs } from './api';
 
 function App() {
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    // Check if already authenticated in this session
+    return sessionStorage.getItem('authenticated') === 'true';
+  });
+
   // Current file/job state
   const [currentFile, setCurrentFile] = useState(null);
   const [currentJob, setCurrentJob] = useState(null);
@@ -113,6 +120,11 @@ function App() {
   const handleJobSelect = (job) => {
     setCurrentJob(job);
   };
+
+  // Show password gate if not authenticated
+  if (!isAuthenticated) {
+    return <PasswordGate onAuthenticated={() => setIsAuthenticated(true)} />;
+  }
 
   return (
     <div className="app">
