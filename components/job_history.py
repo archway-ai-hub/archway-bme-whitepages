@@ -17,34 +17,40 @@ def render_job_history(job_manager: JobManager, session_id: str) -> None:
         job_manager: JobManager instance for Redis operations
         session_id: Current user's session ID
     """
+    # Always show the section, with appropriate content based on Redis availability
     if not job_manager or not job_manager.is_available():
-        return  # Silently skip if Redis unavailable
+        with st.expander("📋 Job History", expanded=False):
+            st.info(
+                "Job history is not available yet. "
+                "Add `REDIS_URL` to your environment to enable job persistence across refreshes."
+            )
+        return
 
     jobs = job_manager.get_user_jobs(session_id)
 
-    if not jobs:
-        return  # No history to show
-
     # Check if any jobs are still processing
-    has_processing = any(job.status == "processing" for job in jobs)
+    has_processing = any(job.status == "processing" for job in jobs) if jobs else False
 
-    with st.expander("📋 Previous Enrichment Runs", expanded=has_processing):
+    with st.expander("📋 Job History", expanded=has_processing):
         # Header with refresh button
         col1, col2 = st.columns([4, 1])
         with col1:
             if has_processing:
                 st.caption("🔄 Auto-refreshing every 5 seconds...")
+            elif not jobs:
+                st.caption("Your enrichment runs will appear here")
         with col2:
             if st.button("🔄", key="refresh_jobs", help="Refresh job status"):
                 st.rerun()
 
-        st.divider()
-
-        for job in jobs:
-            _render_job_card(job, job_manager)
+        if jobs:
+            st.divider()
+            for job in jobs:
+                _render_job_card(job, job_manager)
+        else:
+            st.write("No jobs yet. Start an enrichment to see it here!")
 
     # Auto-refresh if jobs are processing and user isn't actively processing now
-    # (check if we're NOT in the middle of showing progress)
     if has_processing and "processing_results" not in st.session_state:
         time.sleep(5)
         st.rerun()

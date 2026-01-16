@@ -48,12 +48,22 @@ class JobManager:
     def __init__(self):
         """Initialize Redis connection. Set self.redis to None if unavailable."""
         self.redis: Optional[redis.Redis] = None
+        redis_url = os.environ.get("REDIS_URL", "")
+
+        # Skip if no Redis URL configured
+        if not redis_url:
+            return
+
         try:
-            redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-            self.redis = redis.from_url(redis_url, decode_responses=False)
-            # Test connection
+            self.redis = redis.from_url(
+                redis_url,
+                decode_responses=False,
+                socket_connect_timeout=2,  # 2 second timeout
+                socket_timeout=2
+            )
+            # Test connection with timeout
             self.redis.ping()
-        except (redis.ConnectionError, redis.RedisError) as e:
+        except (redis.ConnectionError, redis.RedisError, redis.TimeoutError) as e:
             self.redis = None
     
     def is_available(self) -> bool:

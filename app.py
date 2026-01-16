@@ -12,16 +12,15 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Import from components
+# Import from components (lightweight)
 from components.auth import check_password, logout_button
 from components.upload import render_upload_section, validate_csv, render_preview
-from components.progress import run_processing
 from components.results import render_results, render_download_button
 from components.job_manager import JobManager
 from components.job_history import render_job_history, render_viewed_job_results
 
-# Import from main.py
-from main import Config, parse_csv_row
+# NOTE: Heavy imports (main.py, progress.py) are loaded lazily when processing starts
+# This speeds up initial page load significantly
 
 # Page configuration - must be first Streamlit command
 st.set_page_config(
@@ -86,9 +85,8 @@ def main_app() -> None:
         import uuid
         st.session_state.session_id = str(uuid.uuid4())
     
-    # Show job history if available
-    if st.session_state.job_manager.is_available():
-        render_job_history(st.session_state.job_manager, st.session_state.session_id)
+    # Show job history section (shows helpful message if Redis not configured)
+    render_job_history(st.session_state.job_manager, st.session_state.session_id)
 
     # Check if viewing past job results
     if render_viewed_job_results():
@@ -128,25 +126,34 @@ def main_app() -> None:
     # Calculate records to process based on limit
     records_to_process = min(limit, len(df)) if limit > 0 else len(df)
     st.write(f"We're ready to process **{records_to_process}** records and find the people behind each restaurant.")
-    
-    # Validate required API keys before allowing processing
-    config = Config()
-    if not config.google_places_api_key or not config.openrouter_api_key:
+
+    # Validate required API keys before allowing processing (lightweight check)
+    import os
+    has_google_key = bool(os.environ.get("GOOGLE_PLACES_API_KEY"))
+    has_openrouter_key = bool(os.environ.get("OPENROUTER_API_KEY"))
+    if not has_google_key or not has_openrouter_key:
         st.error(
             "Looks like we're missing some API keys. Please configure GOOGLE_PLACES_API_KEY "
             "and OPENROUTER_API_KEY in your environment or .env file to continue."
         )
         return
-    
+
     # Start Processing button
     if st.button("Start Enrichment", type="primary"):
+        # Lazy import heavy modules only when processing starts
+        # This significantly speeds up initial page load
+        from main import Config, parse_csv_row
+        from components.progress import run_processing
+
+        config = Config()
+
         # Apply limit to dataframe
         df_to_process = df.head(limit) if limit > 0 else df
-        
+
         # Parse CSV rows to RestaurantRecord objects
         records = []
         parse_errors = 0
-        
+
         for _, row in df_to_process.iterrows():
             try:
                 record = parse_csv_row(row)
@@ -155,16 +162,16 @@ def main_app() -> None:
                 parse_errors += 1
                 if parse_errors <= 3:  # Only show first 3 errors
                     st.warning(f"Heads up - had trouble parsing a row: {str(e)[:100]}")
-        
+
         if parse_errors > 3:
             st.warning(f"... and {parse_errors - 3} more rows had parsing issues")
-        
+
         if not records:
             st.error("We couldn't find any valid records to process. Please check your file format.")
             return
-        
+
         st.info(f"Great! We've got {len(records)} records ready to go. Starting enrichment now...")
-        
+
         # Create job for tracking
         job_id = None
         if st.session_state.job_manager.is_available():
@@ -176,7 +183,7 @@ def main_app() -> None:
                 filename=filename,
                 total_records=len(records)
             )
-        
+
         # Run processing with progress tracking
         try:
             results = run_processing(
