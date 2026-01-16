@@ -1,0 +1,14 @@
+[server]
+maxUploadSize = 50
+enableCORS = false
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#5E72E4"
+backgroundColor = "#FAFBFC"
+secondaryBackgroundColor = "#F4F5F7"
+textColor = "#344563"
+font = "sans serif"

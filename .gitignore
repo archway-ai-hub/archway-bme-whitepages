@@ -40,8 +40,15 @@ env/
 
 # Output files
 output.csv
+enriched_output.csv
+test_output.csv
+test_fsq_output.csv
+test_integration_output.csv
 *.xlsx
 *.xls
+
+# Serena
+.serena/
 
 # OS
 .DS_Store

@@ -15,7 +15,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import aiohttp
 import pandas as pd
@@ -1655,9 +1655,22 @@ def format_output_row(record: RestaurantRecord) -> dict:
 async def process_batch(
     records: list[RestaurantRecord],
     config: Config,
-    batch_size: int = 10
+    batch_size: int = 10,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
 ) -> list[RestaurantRecord]:
-    """Process records in parallel batches."""
+    """Process records in parallel batches.
+    
+    Args:
+        records: List of restaurant records to process
+        config: Configuration object with API keys
+        batch_size: Number of concurrent operations (semaphore limit)
+        progress_callback: Optional callback for progress updates.
+            Signature: (current: int, total: int, message: str) -> None
+            If None, uses tqdm for CLI progress display.
+    
+    Returns:
+        List of enriched RestaurantRecord objects
+    """
 
     cache = CacheManager(config.cache_dir)
     google_client = GooglePlacesClient(config.google_places_api_key, cache)
@@ -1669,23 +1682,43 @@ async def process_batch(
 
     # Semaphore to limit concurrent API calls
     semaphore = asyncio.Semaphore(batch_size)
+    total = len(records)
 
     async with aiohttp.ClientSession() as session:
-        tasks = [
-            process_record(
-                record,
-                session,
-                google_client,
-                perplexity_client,
-                whitepages_client,
-                yelp_client,
-                semaphore
-            )
-            for record in records
-        ]
-
-        # Process with progress bar
-        results = await tqdm_asyncio.gather(*tasks, desc="Processing records")
+        if progress_callback is None:
+            # CLI mode: use tqdm for progress display
+            tasks = [
+                process_record(
+                    record,
+                    session,
+                    google_client,
+                    perplexity_client,
+                    whitepages_client,
+                    yelp_client,
+                    semaphore
+                )
+                for record in records
+            ]
+            results = await tqdm_asyncio.gather(*tasks, desc="Processing records")
+        else:
+            # Streamlit mode: use callback for progress updates
+            results = []
+            for i, record in enumerate(records):
+                # Process one record at a time to provide accurate progress
+                result = await process_record(
+                    record,
+                    session,
+                    google_client,
+                    perplexity_client,
+                    whitepages_client,
+                    yelp_client,
+                    semaphore
+                )
+                results.append(result)
+                
+                # Report progress via callback
+                display_name = result.restaurant_name or result.llc_name or "Unknown"
+                progress_callback(i + 1, total, f"Processed: {display_name}")
 
     return results
 
