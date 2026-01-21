@@ -93,13 +93,16 @@ app = FastAPI(
 
 # Configure CORS - in production, set CORS_ORIGINS env var to your frontend URL
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+# Strip whitespace from origins
+CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS]
+logger.info(f"CORS allowed origins: {CORS_ORIGINS}")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -499,7 +502,10 @@ async def list_jobs(session_id: Optional[str] = None):
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for monitoring."""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "cors_origins": CORS_ORIGINS,
+    }
 
 
 if __name__ == "__main__":
