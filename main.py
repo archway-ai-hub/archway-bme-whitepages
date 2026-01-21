@@ -1193,22 +1193,23 @@ Example response formats:
 
 
 class WhitepagesClient:
-    """Whitepages Pro API client for owner personal information lookup.
+    """Whitepages API client for owner personal information lookup.
 
-    Uses Whitepages Pro 2.2 Person API to find owner's personal contact information
-    (home address, personal phone) distinct from restaurant contact info.
+    Uses Whitepages API v1 Person endpoint to find owner's personal contact information
+    (home address, personal phone, email) distinct from restaurant contact info.
 
     API Documentation:
-        Endpoint: https://proapi.whitepages.com/2.2/person.json
-        Auth: api_key query parameter
-        Params: api_key, name, city, state_code (2-letter state code)
-        Response: {"results": [...]} with locations[], phones[] arrays
+        Endpoint: https://api.whitepages.com/v1/person/
+        Auth: X-Api-Key header
+        Params: name (required only - API doesn't support city/state filtering)
+        Response: Array of PersonResponseDto objects with current_addresses, phones, emails
+        Note: We filter results by state locally by checking current_addresses
     """
 
     def __init__(self, api_key: str, cache: CacheManager):
         self.api_key = api_key
         self.cache = cache
-        self.base_url = "https://proapi.whitepages.com/2.2/person.json"
+        self.base_url = "https://api.whitepages.com/v1/person/"
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def lookup_person(
@@ -1233,7 +1234,8 @@ class WhitepagesClient:
                 "personal_city": str,
                 "personal_state": str,
                 "personal_zip": str,
-                "personal_phone": str
+                "personal_phone": str,
+                "personal_email": str
             }
         """
         if not self.api_key:
@@ -1251,22 +1253,25 @@ class WhitepagesClient:
             print(f"[Whitepages] Cache hit for {name}")
             return cached
 
-        # Authentication via query parameter (NOT header)
+        # Query parameters - API only supports 'name' parameter
+        # City/state filtering must be done by parsing results (see current_addresses)
         params = {
-            "api_key": self.api_key,
             "name": name,
-            "city": city,
-            "state_code": state.upper()[:2]  # API expects 2-letter state code
+        }
+
+        # Authentication via header (NOT query parameter)
+        headers = {
+            "X-Api-Key": self.api_key
         }
 
         print(f"[Whitepages] Looking up: {name} in {city}, {state}")
 
         try:
-            async with session.get(self.base_url, params=params) as resp:
+            async with session.get(self.base_url, params=params, headers=headers) as resp:
                 if resp.status == 429:
                     print(f"[Whitepages] Rate limit exceeded")
                     return None
-                if resp.status == 401:
+                if resp.status == 403:
                     print(f"[Whitepages] Authentication failed - check API key")
                     return None
                 if resp.status != 200:
@@ -1275,41 +1280,94 @@ class WhitepagesClient:
                     return None
 
                 data = await resp.json()
-                print(f"[Whitepages] Response received, parsing results...")
+                print(f"[Whitepages] Response received ({len(data) if isinstance(data, list) else 0} results), parsing...")
 
-                # Response structure: {"results": [...]}
-                results = data.get("results", [])
-                if not results:
+                # Response is an array of PersonResponseDto objects
+                if not data or not isinstance(data, list) or len(data) == 0:
                     print(f"[Whitepages] No results found for {name}")
                     return None
 
-                # Take first/best match
-                person = results[0]
+                # Filter results by state if provided (API doesn't support state param)
+                # Look for results with current_addresses in matching state
+                person = None
+                target_state = state.upper()[:2] if state else None
 
-                # Initialize result structure (no email - API doesn't return it)
+                for candidate in data:
+                    current_addresses = candidate.get("current_addresses", [])
+                    if not current_addresses:
+                        continue
+
+                    # Check if any current address matches target state
+                    for addr in current_addresses:
+                        addr_str = addr.get("address", "")
+                        # Address format: "514 Whilden St Mount Pleasant, SC 29464"
+                        if target_state and f", {target_state} " in addr_str.upper():
+                            person = candidate
+                            print(f"[Whitepages] Found match in {target_state}: {candidate.get('name')}")
+                            break
+                    if person:
+                        break
+
+                # If no state match found, use first result
+                if not person:
+                    person = data[0]
+                    print(f"[Whitepages] No state match, using first result: {person.get('name')}")
+
+                # Initialize result structure
                 result = {
                     "personal_address": None,
                     "personal_city": None,
                     "personal_state": None,
                     "personal_zip": None,
-                    "personal_phone": None
+                    "personal_phone": None,
+                    "personal_email": None
                 }
 
-                # Parse location (first one)
-                locations = person.get("locations", [])
-                if locations:
-                    loc = locations[0]
-                    result["personal_address"] = loc.get("standard_address_line1", "")
-                    result["personal_city"] = loc.get("city", "")
-                    result["personal_state"] = loc.get("state_code", "")
-                    result["personal_zip"] = loc.get("postal_code", "")
+                # Parse current address (first one) - new API structure
+                current_addresses = person.get("current_addresses", [])
+                if current_addresses:
+                    addr = current_addresses[0]
+                    full_address = addr.get("address", "")
+                    # Full address format: "514 Whilden St Mount Pleasant, SC 29464"
+                    # Parse using regex to handle multi-word cities
+                    if full_address:
+                        # Pattern: "street city, ST zip" where city can be multiple words
+                        import re
+                        # Match: anything, 2-letter state, 5-digit zip
+                        match = re.match(r'^(.+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$', full_address)
+                        if match:
+                            street_city = match.group(1).strip()
+                            result["personal_state"] = match.group(2)
+                            result["personal_zip"] = match.group(3)
+                            # Now split street from city - look for common street suffixes
+                            # Street suffixes: St, Ave, Rd, Dr, Blvd, Ln, Ct, Way, Pl, Cir, etc.
+                            street_match = re.match(
+                                r'^(.+?\s+(?:St|Ave|Rd|Dr|Blvd|Ln|Ct|Way|Pl|Cir|Ter|Pkwy|Hwy|Loop|Trl|Run|Pass|Cv)\.?)\s+(.+)$',
+                                street_city,
+                                re.IGNORECASE
+                            )
+                            if street_match:
+                                result["personal_address"] = street_match.group(1)
+                                result["personal_city"] = street_match.group(2)
+                            else:
+                                # Fallback: put everything as address
+                                result["personal_address"] = street_city
+                        else:
+                            result["personal_address"] = full_address
                     print(f"[Whitepages] Found address: {result['personal_address']}, {result['personal_city']}, {result['personal_state']} {result['personal_zip']}")
 
-                # Parse phone (first one)
+                # Parse phone (first one with highest score) - new API structure
                 phones = person.get("phones", [])
                 if phones:
-                    result["personal_phone"] = phones[0].get("phone_number", "")
+                    # Phones are already sorted by score (highest first)
+                    result["personal_phone"] = phones[0].get("number", "")
                     print(f"[Whitepages] Found phone: {result['personal_phone']}")
+
+                # Parse email (first one) - new API now includes emails
+                emails = person.get("emails", [])
+                if emails:
+                    result["personal_email"] = emails[0]
+                    print(f"[Whitepages] Found email: {result['personal_email']}")
 
                 # Cache the result
                 self.cache.set("whitepages_person", cache_key, value=result)
@@ -1569,7 +1627,9 @@ async def process_record(
             log_verbose(f"  No owner found")
 
         # Step 4: Enrich owner with Whitepages personal info
-        if best_owner and record.city and record.state:
+        # Only call Whitepages if owner was actually discovered (via Perplexity or CSV match)
+        # NOT for pure CSV fallback owners (where best_owner_result is None)
+        if best_owner and record.city and record.state and best_owner_result is not None:
             wp_result = await whitepages_client.lookup_person(
                 session,
                 best_owner.name,
@@ -1582,9 +1642,13 @@ async def process_record(
                 best_owner.personal_state = wp_result.get("personal_state")
                 best_owner.personal_zip = wp_result.get("personal_zip")
                 best_owner.personal_phone = wp_result.get("personal_phone")
+                best_owner.personal_email = wp_result.get("personal_email")
                 # Update source to indicate Whitepages enrichment
-                if wp_result.get("personal_phone"):
+                if wp_result.get("personal_phone") or wp_result.get("personal_email"):
                     best_owner.source = "whitepages"
+                log_verbose(f"  Whitepages enriched: phone={wp_result.get('personal_phone')}, email={wp_result.get('personal_email')}")
+        elif best_owner and best_owner_result is None:
+            log_verbose(f"  Skipping Whitepages: owner is CSV fallback, not discovered via search")
 
         return record
 
@@ -1624,8 +1688,10 @@ def format_output_row(record: RestaurantRecord) -> dict:
     else:
         phone = record.phone
 
-    # Email fallback - Whitepages doesn't return email, use existing data if available
-    if owner and owner.email:
+    # Email: prioritize Whitepages personal email, then CSV match, then restaurant
+    if owner and owner.personal_email:
+        email = owner.personal_email
+    elif owner and owner.email:
         email = owner.email
     else:
         email = record.email
@@ -1785,9 +1851,11 @@ Environment Variables:
     print(f"Processing records with batch size {args.batch_size}...")
     processed_records = asyncio.run(process_batch(records, config, args.batch_size))
 
-    # Format output
+    # Filter to only records with owners found, then format output
     print("Formatting output...")
-    output_rows = [format_output_row(record) for record in processed_records]
+    records_with_owners = [r for r in processed_records if r.owners]
+    records_without_owners = len(processed_records) - len(records_with_owners)
+    output_rows = [format_output_row(record) for record in records_with_owners]
 
     # Write output
     output_df = pd.DataFrame(output_rows)
@@ -1797,12 +1865,12 @@ Environment Variables:
     print(f"Total output rows: {len(output_rows)}")
 
     # Summary
-    owners_found = sum(1 for r in processed_records if r.owners)
-    owners_with_phone = sum(1 for r in processed_records for o in r.owners if o.phone)
+    owners_with_phone = sum(1 for r in records_with_owners for o in r.owners if o.phone)
 
     print(f"\nSummary:")
     print(f"  Records processed: {len(processed_records)}")
-    print(f"  Records with owners found: {owners_found}")
+    print(f"  Records with owners found: {len(records_with_owners)}")
+    print(f"  Records skipped (no owner): {records_without_owners}")
     print(f"  Owners with phone numbers: {owners_with_phone}")
 
 

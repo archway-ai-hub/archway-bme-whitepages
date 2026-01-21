@@ -28,6 +28,7 @@ rm -rf .cache
 
 - `GOOGLE_PLACES_API_KEY` - Google Places Nearby Search API
 - `OPENROUTER_API_KEY` - OpenRouter API key (accesses Perplexity sonar-pro model)
+- `WHITEPAGES_API_KEY` - Whitepages Pro API key for owner personal info enrichment
 
 ## Architecture
 
@@ -38,12 +39,14 @@ Single-file CLI (`main.py`) with async parallel processing:
 3. **API Clients**:
    - `GooglePlacesClient` - Nearby Search for restaurant name resolution (uses lat/long)
    - `PerplexityClient` - Via OpenRouter for name resolution fallback and owner discovery
+   - `WhitepagesClient` - Owner personal info enrichment (address, phone, email)
 4. **Processing Pipeline** (`process_record`):
    - Extract DBA from LLC name if present (regex)
    - Try Google Places if coordinates exist
    - Fall back to Perplexity for name resolution
    - Find owner via Perplexity
    - Fuzzy match owner against CSV persons (rapidfuzz, 80% threshold)
+   - Enrich owner info via Whitepages lookup (called for every owner found)
 5. **Async batch processing** with semaphore-limited concurrency
 
 ## Input CSV Expected Columns
@@ -65,15 +68,23 @@ Use this file for all testing going forward:
 python main.py /Users/samruben/Downloads/InsuranceX_50+.csv -o output.csv --limit 10 -v
 ```
 
-## TODO: Whitepages Integration
+## Whitepages Configuration
 
-Whitepages enrichment is currently disabled (free trial limited to 50 lookups).
+Whitepages enrichment is now enabled in the pipeline and called for every owner discovered.
 
-### Why Whitepages is Needed
+### How It Works
 
-The input CSV contains **restaurant** address/phone, NOT the owner's personal info. The goal is to find where the **owner lives** for direct outreach. Whitepages provides owner's personal address, phone, and email.
+The input CSV contains **restaurant** address/phone, NOT the owner's personal info. The pipeline finds the owner's personal address, phone, and email via Whitepages for direct outreach.
 
-### Correct Pipeline
+### Whitepages API Details
+
+- **Endpoint**: `https://api.whitepages.com/v1/person/`
+- **Authentication**: X-Api-Key header (not query parameter)
+- **Parameters**: `name` (required; city/state filtering applied locally)
+- **Returns**: Personal address, phone, emails for the owner
+- **Key lookup parameter**: Owner name + city + state (matched locally for accuracy)
+
+### Complete Enrichment Pipeline
 
 ```
 Step 1: Resolve Restaurant Name
@@ -81,22 +92,12 @@ Step 1: Resolve Restaurant Name
 
 Step 2: Find Owner Name
   - Perplexity: "Who owns [restaurant] in [city], [state]?"
-  - Bonus: Check if owner matches name1-10 columns (may already have their phone)
 
-Step 3: Whitepages Lookup (EVERY record)
-  - Call with: owner name + city + state
-  - Returns: owner's PERSONAL address, phone, email (where they LIVE)
-  - This is the key enrichment step
+Step 3: Whitepages Lookup
+  - Query: owner name
+  - Results filtered by city + state match
+  - Returns: owner's personal address, phone, email
 
 Step 4: Output combined data
+  - Restaurant info + owner personal contact details
 ```
-
-### To Re-enable
-
-1. Get Whitepages Pro API key from https://pro.whitepages.com/
-2. Add `WHITEPAGES_API_KEY` environment variable
-3. Restore `WhitepagesClient` class:
-   - Endpoint: `https://proapi.whitepages.com/3.3/person`
-   - Params: `api_key`, `name`, `address.city`, `address.state_code`
-4. Call Whitepages for **every** owner found (not just missing matches)
-5. Output should include owner's personal phone/address, distinct from restaurant contact
