@@ -303,14 +303,58 @@ class JobManager:
         """Get current progress for a job."""
         if not self.is_available():
             return None
-        
+
         try:
             progress_key = f"job:{job_id}:progress"
             progress_raw = self.redis.get(progress_key)
-            
+
             if not progress_raw:
                 return None
-            
+
             return json.loads(progress_raw.decode())
         except (redis.ConnectionError, redis.RedisError, json.JSONDecodeError):
             return None
+
+    def delete_job(self, job_id: str, session_id: str = None) -> bool:
+        """Delete a job and all its associated data from Redis."""
+        if not self.is_available():
+            return False
+
+        try:
+            # Delete all job keys
+            meta_key = f"job:{job_id}:meta"
+            results_key = f"job:{job_id}:results"
+            progress_key = f"job:{job_id}:progress"
+
+            self.redis.delete(meta_key, results_key, progress_key)
+
+            # Remove from user's job list if session_id provided
+            if session_id:
+                user_jobs_key = f"user:{session_id}:jobs"
+                self.redis.lrem(user_jobs_key, 0, job_id)
+
+            return True
+        except (redis.ConnectionError, redis.RedisError):
+            return False
+
+    def delete_all_jobs(self, session_id: str) -> int:
+        """Delete all jobs for a session. Returns count of deleted jobs."""
+        if not self.is_available():
+            return 0
+
+        try:
+            user_jobs_key = f"user:{session_id}:jobs"
+            job_ids = self.redis.lrange(user_jobs_key, 0, -1)
+
+            deleted = 0
+            for job_id_bytes in job_ids:
+                job_id = job_id_bytes.decode() if isinstance(job_id_bytes, bytes) else job_id_bytes
+                if self.delete_job(job_id):
+                    deleted += 1
+
+            # Clear the user's job list
+            self.redis.delete(user_jobs_key)
+
+            return deleted
+        except (redis.ConnectionError, redis.RedisError):
+            return 0

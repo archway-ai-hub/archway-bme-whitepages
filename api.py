@@ -513,6 +513,40 @@ async def list_jobs(session_id: Optional[str] = None):
         return JobListResponse(jobs=sorted(jobs, key=lambda j: j.created_at, reverse=True))
 
 
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(job_id: str, session_id: Optional[str] = None):
+    """Delete a specific job."""
+    if redis_available():
+        success = job_manager.delete_job(job_id, session_id)
+        if success:
+            return {"message": f"Job {job_id} deleted"}
+        raise HTTPException(status_code=500, detail="Failed to delete job")
+    else:
+        # In-memory fallback
+        if job_id in in_memory_jobs:
+            del in_memory_jobs[job_id]
+            if job_id in in_memory_results:
+                del in_memory_results[job_id]
+            return {"message": f"Job {job_id} deleted"}
+        raise HTTPException(status_code=404, detail="Job not found")
+
+
+@app.delete("/api/jobs")
+async def delete_all_jobs(session_id: str):
+    """Delete all jobs for a session."""
+    if redis_available():
+        deleted = job_manager.delete_all_jobs(session_id)
+        return {"message": f"Deleted {deleted} jobs"}
+    else:
+        # In-memory fallback
+        to_delete = [jid for jid, job in in_memory_jobs.items() if job.session_id == session_id]
+        for jid in to_delete:
+            del in_memory_jobs[jid]
+            if jid in in_memory_results:
+                del in_memory_results[jid]
+        return {"message": f"Deleted {len(to_delete)} jobs"}
+
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for monitoring."""
