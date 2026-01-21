@@ -95,7 +95,7 @@ app = FastAPI(
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
 # Strip whitespace from origins
 CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS]
-logger.info(f"CORS allowed origins: {CORS_ORIGINS}")
+print(f"CORS allowed origins: {CORS_ORIGINS}")
 
 app.add_middleware(
     CORSMiddleware,
