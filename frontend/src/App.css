@@ -521,6 +521,29 @@
   outline-offset: 2px;
 }
 
+.job-history-delete-btn {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: none;
+  padding: var(--space-xs);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.job-history-delete-btn:hover {
+  color: var(--color-error);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.job-history-delete-btn:focus-visible {
+  outline: 2px solid var(--color-error);
+  outline-offset: 2px;
+}
+
 /* Loading State */
 .loading {
   text-align: center;

@@ -4,7 +4,7 @@ import FileUpload from './components/FileUpload';
 import JobStatus from './components/JobStatus';
 import JobHistory from './components/JobHistory';
 import PasswordGate from './components/PasswordGate';
-import { uploadFile, startJob, getJobStatus, getJobResults, getJobs } from './api';
+import { uploadFile, startJob, getJobStatus, getJobResults, getJobs, deleteJob } from './api';
 
 function App() {
   // Authentication state
@@ -121,6 +121,22 @@ function App() {
     setCurrentJob(job);
   };
 
+  const handleDelete = async (jobId) => {
+    if (!confirm('Are you sure you want to delete this job?')) {
+      return;
+    }
+    try {
+      await deleteJob(jobId);
+      // Clear current job if it's the one being deleted
+      if (currentJob && (currentJob.id === jobId || currentJob.job_id === jobId)) {
+        setCurrentJob(null);
+      }
+      loadJobs();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   // Show password gate if not authenticated
   if (!isAuthenticated) {
     return <PasswordGate onAuthenticated={() => setIsAuthenticated(true)} />;
@@ -170,6 +186,7 @@ function App() {
             onJobSelect={handleJobSelect}
             onDownload={handleDownload}
             onRefresh={loadJobs}
+            onDelete={handleDelete}
           />
         </section>
       </main>
