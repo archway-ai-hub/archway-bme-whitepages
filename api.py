@@ -179,6 +179,13 @@ async def run_enrichment(job_id: str, file_path: str, config: Config) -> None:
         else:
             df = pd.read_csv(path)
 
+        # Filter out empty rows (rows where 'name' column is empty/null)
+        if "name" in df.columns:
+            df = df[df["name"].notna() & (df["name"].astype(str).str.strip() != "")]
+        else:
+            # Fallback: drop rows where all values are empty
+            df = df.dropna(how="all")
+
         # Parse records
         records = []
         for _, row in df.iterrows():
@@ -288,6 +295,13 @@ async def upload_file(file: UploadFile = File(...), session_id: Optional[str] = 
             df = pd.read_excel(path)
         else:
             df = pd.read_csv(path)
+
+        # Filter out empty rows (rows where 'name' column is empty/null)
+        if "name" in df.columns:
+            df = df[df["name"].notna() & (df["name"].astype(str).str.strip() != "")]
+        else:
+            # Fallback: drop rows where all values are empty
+            df = df.dropna(how="all")
 
         total_records = len(df)
 
